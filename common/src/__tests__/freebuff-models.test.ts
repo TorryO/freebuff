@@ -59,6 +59,7 @@ import {
   SUPPORTED_FREEBUFF_MODELS,
   FREEBUFF_WEB_PREMIUM_MODEL_IDS,
   canFreebuffModelSpawnGeminiThinker,
+  freebuffAppDefaultModelIds,
   freebuffWithdrawnModelMessage,
   getFreebuffDeploymentAvailabilityLabel,
   getFreebuffModel,
@@ -77,7 +78,6 @@ import {
   isFreebuffLimitedOfferModelId,
   isFreebuffModelAllowedForAccessTier,
   isFreebuffModelId,
-  isFreebuffMultimodalModelId,
   isFreebuffPausedFreeModelId,
   isFreebuffProOnlyEverySurfaceModelId,
   isFreebuffProOnlyCatalogModelId,
@@ -693,7 +693,7 @@ describe('freebuff model availability', () => {
     ).toBeUndefined()
 
     for (const model of SUPPORTED_FREEBUFF_MODELS) {
-      expect(isFreebuffMultimodalModelId(model.id)).toBe(model.multimodal)
+      expect(getFreebuffModelImageSupport(model.id)).toBe(model.multimodal)
     }
     for (const model of FREEBUFF_WEB_ALL_MODELS) {
       expect(isFreebuffWebMultimodalModelId(model.id)).toBe(model.multimodal)
@@ -820,17 +820,12 @@ describe('freebuff model availability', () => {
   test('the picker-retirement list holds only ids that are harmless to reach', () => {
     // A picker-only retirement is a UI change; withdrawal is the pause list's
     // job. So every entry here has to pass the bar the list's own doc sets:
-    // harmless to reach.
+    // harmless to reach: it costs what its replacement costs, is metered by
+    // the same pool, and spends no scarcer budget.
     //
-    // Muse Spark 1.2 passes it (parked 2026-09-02 while its Web sessions
-    // drain): it costs exactly what its replacement costs, is metered by the
-    // same premium pool, and spends the same Contributor-tier budget at Meta.
-    // It is a temporary occupant — see the removal order on its constant. If
-    // anything ELSE turns up here, check it against the same three questions
-    // before accepting it.
-    // EMPTY since 2026-09-07: its only occupant, Muse Spark 1.2, went back
-    // into the pickers when 1.3 was withdrawn. An id landing here again should
-    // be checked against the same three questions in the comment above.
+    // EMPTY since 2026-09-07: its last occupant, Muse Spark 1.2 (parked
+    // 2026-09-02), went back into the pickers when 1.3 was withdrawn. An id
+    // landing here again should be checked against those three questions.
     expect(FREEBUFF_WEB_RETIRED_PICKER_MODEL_IDS).toEqual([])
     for (const id of FREEBUFF_WEB_RETIRED_PICKER_MODEL_IDS) {
       // Still a session model (live sessions keep running) and still metered
@@ -1380,8 +1375,6 @@ describe('freebuff model availability', () => {
       FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
       FREEBUFF_SOLAR_MINI_4_MODEL_ID,
       FREEBUFF_SOLAR_PRO_4_MODEL_ID,
-      // Listed at limited access since 2026-10-01; admission already allowed it.
-      'stealth/space-bunny-alpha',
     ])
     // The tier's own rows first, then every row a plan unlocks there — LISTED
     // to every limited account (2026-09-30) and drawn locked without a plan.
@@ -1456,7 +1449,7 @@ describe('freebuff model availability', () => {
       ),
     ).toBe(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID)
     expect(LIMITED_FREEBUFF_MODEL_MISMATCH_MESSAGE).toBe(
-      'Limited free access is only available with MiMo 2.6 Flash or GLM 5.3 Flash or DeepSeek V4.1 Flash or Solar Mini 4 or Solar Pro 4 or Space Bunny Alpha.',
+      'Limited free access is only available with MiMo 2.6 Flash or GLM 5.3 Flash or DeepSeek V4.1 Flash or Solar Mini 4 or Solar Pro 4.',
     )
     // No row in the tier supersedes another, so no picker may offer a switch
     // that admission would coerce straight back.
@@ -1514,7 +1507,41 @@ describe('freebuff model availability', () => {
     ).toBe(FREEBUFF_MIMO_V25_MODEL_ID)
   })
 
-  test('every surface starts on MiMo 2.6 Flash, on two separate constants', () => {
+  test('Desktop and the browser workspace start on Fast off-peak, Flash at peak, MiMo when limited', () => {
+    const weekdayOffPeak = new Date('2026-10-06T15:00:00Z')
+    const weekdayPeak = new Date('2026-10-07T02:00:00Z')
+    const beijingSaturdayPeakHour = new Date('2026-10-10T02:00:00Z')
+    expect(freebuffAppDefaultModelIds('full', weekdayOffPeak)).toEqual([
+      FREEBUFF_DEEPSEEK_V4_FLASH_FAST_MODEL_ID,
+      FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+    ])
+    expect(freebuffAppDefaultModelIds('full', weekdayPeak)).toEqual([
+      FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+    ])
+    // DeepSeek's weekend is off-peak at every hour, as Fast's price is.
+    expect(
+      freebuffAppDefaultModelIds('full', beijingSaturdayPeakHour)[0],
+    ).toBe(FREEBUFF_DEEPSEEK_V4_FLASH_FAST_MODEL_ID)
+    // Fast is plan-only at limited access, so an unknown tier never gets it.
+    expect(freebuffAppDefaultModelIds(undefined, weekdayOffPeak)).toEqual([
+      FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+    ])
+    expect(freebuffAppDefaultModelIds('limited', weekdayOffPeak)).toEqual([
+      FREEBUFF_MIMO_V25_MODEL_ID,
+    ])
+    for (const tier of ['full', 'limited'] as const)
+      for (const id of freebuffAppDefaultModelIds(tier, weekdayOffPeak))
+        expect(
+          getFreebuffModelsForAccessTier(tier).some((m) => m.id === id),
+        ).toBe(true)
+    expect(
+      getFreebuffModelsForAccessTier('limited').some(
+        (m) => m.id === FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID,
+      ),
+    ).toBe(true)
+  })
+
+  test('the CLI and Cloud defaults are MiMo 2.6 Flash, on two separate constants', () => {
     // They stay TWO constants because they have diverged before and may again.
     expect(DEFAULT_FREEBUFF_WEB_MODEL_ID).toBe(FREEBUFF_MIMO_V25_MODEL_ID)
     expect(DEFAULT_FREEBUFF_MODEL_ID).toBe(FREEBUFF_MIMO_V25_MODEL_ID)

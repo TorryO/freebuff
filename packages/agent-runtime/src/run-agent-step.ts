@@ -1,5 +1,5 @@
 import { contextPrunerBudgetForModel } from '@codebuff/common/constants/model-config'
-import { modelCompactionThreshold } from '@codebuff/common/constants/compaction-policy'
+import { compactionThreshold } from '@codebuff/common/constants/compaction-policy'
 import {
   supportsAssistantPrefill,
   supportsCacheControl,
@@ -7,6 +7,7 @@ import {
 import { PROJECT_PROFILE_TOOL_NAME } from '@codebuff/common/constants/project-profile'
 import { TOOLS_WHICH_WONT_FORCE_NEXT_STEP } from '@codebuff/common/tools/constants'
 import { parseAgentId } from '@codebuff/common/util/agent-id-parsing'
+import { TODO_PROGRESS_REMINDER_EVENT } from '@codebuff/common/util/axiom-only-log'
 import { buildArray } from '@codebuff/common/util/array'
 import {
   AbortError,
@@ -29,14 +30,20 @@ import { type ToolSet } from 'ai'
 import { cloneDeep, mapValues } from 'lodash'
 import z from 'zod/v4'
 
-import { evaluateCompactionTrigger } from './compact-history'
+import {
+  evaluateCompactionTrigger,
+  MECHANICAL_TARGET_SHARE,
+} from './compact-history'
 import type { CompactionTrigger } from './compact-history'
 import {
+  closeCompactionWindow,
+  openCompactionWindow,
+} from './compaction-followup'
+import type { CompactionWindow } from './compaction-followup'
+import {
   automaticCompactionIsWorthwhile,
-  COMPACTION_LOW_WATER,
-  compactWithModelOrFallback,
-  compactionTools,
-} from './model-compaction'
+  compactMechanically,
+} from './compaction'
 import { CACHE_DEBUG_FULL_LOGGING } from './constants'
 import { getMCPToolData } from './mcp'
 import {
@@ -49,6 +56,10 @@ import {
   decideFollowupTodoNudge,
   FOLLOWUP_TODO_NUDGE_TAG,
 } from './util/followup-todo-nudge'
+import {
+  decideTodoProgressReminder,
+  TODO_PROGRESS_REMINDER_TAG,
+} from './util/todo-progress-reminder'
 import {
   hasFileEditTool,
   TODO_LOOP_RECOVERY_TAG,
@@ -735,6 +746,32 @@ export const runAgentStep = async (
     }
   }
 
+  // A to-do list the model never ticks off reads 0/N until the turn's last
+  // step; see util/todo-progress-reminder.ts. Once per list, mid-turn only.
+  if (!shouldEndTurn) {
+    const reminder = decideTodoProgressReminder(agentState.messageHistory)
+    if (reminder) {
+      logger.info(
+        {
+          axiomEvent: TODO_PROGRESS_REMINDER_EVENT,
+          done: reminder.done,
+          total: reminder.total,
+          callsSinceUpdate: reminder.callsSinceUpdate,
+          model: agentTemplate.model,
+          agentId: agentTemplate.id,
+          runId: agentState.runId,
+        },
+        'To-do list not updated for several tool calls; reminding',
+      )
+      agentState.messageHistory.push(
+        userMessage({
+          content: withSystemTags(reminder.message),
+          tags: [TODO_PROGRESS_REMINDER_TAG],
+        }),
+      )
+    }
+  }
+
   agentState = {
     ...agentState,
     stepsRemaining: agentState.stepsRemaining - 1,
@@ -1163,6 +1200,7 @@ export async function loopAgentSteps(
   let totalSteps = 0
   let llmStepNumber = 0
   let nResponses: string[] | undefined = undefined
+  let compactionWindow: CompactionWindow | undefined
 
   try {
     while (true) {
@@ -1225,7 +1263,7 @@ export async function loopAgentSteps(
         const maxContextLength =
           policy.maxContextLength ??
           contextPrunerBudgetForModel(agentTemplate.model)
-        const thresholdTokens = modelCompactionThreshold(maxContextLength)
+        const thresholdTokens = compactionThreshold(maxContextLength)
         let trigger: CompactionTrigger | 'manual' | null = manualCompaction
           ? 'manual'
           : evaluateCompactionTrigger({
@@ -1272,72 +1310,41 @@ export async function loopAgentSteps(
           trigger = null
         }
         if (trigger) {
-          const before = currentAgentState.directCreditsUsed
           const started = Date.now()
           const isRoot = !initialAgentState.parentId
           if (isRoot) params.onCompactionStart?.({ trigger })
-          let compacted: Awaited<ReturnType<typeof compactWithModelOrFallback>>
-          // Ends after the receipt, so a host never sees a gap between the
-          // pass it is showing and the handoff that replaces it.
+          let compacted: ReturnType<typeof compactMechanically> = null
           try {
-            // A compaction failure must never fail the turn: a summarizer error
-            // or malformed handoff falls back to the mechanical pass.
-            compacted = await compactWithModelOrFallback({
+            compacted = compactMechanically({
               messages: currentAgentState.messageHistory,
-              system,
               maxContextLength,
               fixedTokenCount,
-              maxOutputTokens: policy.maxOutputTokens,
-              // An automatic pass must leave the run under its own trigger, or
-              // the next step fires it again on the fallback's output.
-              ...(trigger === 'manual'
-                ? {}
-                : {
-                    fallbackTargetTokens: Math.floor(
-                      thresholdTokens * COMPACTION_LOW_WATER,
-                    ),
-                  }),
-              signal,
+              targetTokens:
+                trigger === 'manual'
+                  ? undefined
+                  : Math.floor(thresholdTokens * MECHANICAL_TARGET_SHARE),
+              trigger,
               logger,
               runId,
               model: agentTemplate.model,
-              trigger,
-              stream: (messages, maxOutputTokens, onFinishReason) =>
-                getAgentStreamFromTemplate({
-                  ...params,
-                  agentId: agentType,
-                  template: agentTemplate,
-                  runId,
-                  messages,
-                  tools: compactionTools,
-                  toolChoice: 'required',
-                  maxOutputTokens,
-                  onFinishReason,
-                  onCostCalculated: async (credits) => {
-                    currentAgentState.creditsUsed += credits
-                    currentAgentState.directCreditsUsed += credits
-                  },
-                  // Compaction usage is spend, not the next root request's context.
-                  onUsageReceived: (usage) =>
-                    params.onAgentUsageReceived?.({
-                      ...usage,
-                      isRoot: false,
-                      agentId: currentAgentState.agentId,
-                    }),
-                  onUsageIncomplete: params.onAgentUsageIncomplete,
-                }),
-            })
-            await addAgentStep({
-              ...params,
-              agentRunId: runId,
-              stepNumber: totalSteps,
-              credits: currentAgentState.directCreditsUsed - before,
-              childRunIds: [],
-              messageId: null,
-              status: 'completed',
-              startTime,
+              contextTokenCount: currentAgentState.contextTokenCount,
             })
             if (compacted) {
+              if (compactionWindow)
+                closeCompactionWindow({
+                  window: compactionWindow,
+                  messages: currentAgentState.messageHistory,
+                  endedBy: 'compaction',
+                  nextTrigger: trigger,
+                  logger,
+                  runId,
+                  model: agentTemplate.model,
+                })
+              compactionWindow = openCompactionWindow({
+                before: currentAgentState.messageHistory,
+                after: compacted.messages,
+                trigger,
+              })
               currentAgentState.messageHistory = compacted.messages
               currentAgentState.contextTokenBaseline = undefined
               currentAgentState.contextTokenCount = compacted.postTokens
@@ -1466,7 +1473,7 @@ export async function loopAgentSteps(
         currentAgentState.messageHistory.push(
           userMessage({
             content: withSystemTags(
-              'Final completion check: compare the actual deliverables with the user request: exact paths, interfaces, formats, correctness, and any performance requirements. If a necessary check or repair is missing, use the available tools to finish it within the remaining budget. Verify the final edited files; rerun affected checks after repairs, but do not repeat passing checks when the relevant files have not changed. Preserve the tested command\'s exit status when filtering output (for example, Bash pipefail or explicit status capture); a successful output filter is not a passing test. Fix causes rather than skipping tests, weakening assertions, swallowing errors, or adding type/lint suppressions just to pass. If changing a check is required by the requested behavior, explain why and verify that behavior. Respect permission boundaries, refusals, and requests to stop; if awaiting user input or genuinely blocked, report that and end. Otherwise give a concise final answer stating what was verified, which checks failed or could not run, and any remaining limitations.',
+              "Final completion check: compare the actual deliverables with the user request: exact paths, interfaces, formats, correctness, and any performance requirements. If a necessary check or repair is missing, use the available tools to finish it within the remaining budget. Verify the final edited files; rerun affected checks after repairs, but do not repeat passing checks when the relevant files have not changed. Preserve the tested command's exit status when filtering output (for example, Bash pipefail or explicit status capture); a successful output filter is not a passing test. Fix causes rather than skipping tests, weakening assertions, swallowing errors, or adding type/lint suppressions just to pass. If changing a check is required by the requested behavior, explain why and verify that behavior. Respect permission boundaries, refusals, and requests to stop; if awaiting user input or genuinely blocked, report that and end. Otherwise give a concise final answer stating what was verified, which checks failed or could not run, and any remaining limitations.",
             ),
           }),
         )
@@ -1623,7 +1630,11 @@ export async function loopAgentSteps(
             content: frameSteeringContent(
               typeof message === 'string'
                 ? buildUserMessageContent(message, undefined)
-                : buildUserMessageContent(message.prompt, undefined, message.content),
+                : buildUserMessageContent(
+                    message.prompt,
+                    undefined,
+                    message.content,
+                  ),
             ),
             tags: ['USER_PROMPT'],
             keepDuringTruncation: true,
@@ -1842,6 +1853,15 @@ export async function loopAgentSteps(
       },
     }
   } finally {
+    if (compactionWindow)
+      closeCompactionWindow({
+        window: compactionWindow,
+        messages: currentAgentState.messageHistory,
+        endedBy: 'run_end',
+        logger,
+        runId,
+        model: agentTemplate.model,
+      })
     // The endTurn path inside runProgrammaticStep handles normal completion,
     // but abort/error exits (e.g. chat SSE disconnects) would otherwise leak
     // the run's generator, STEP_ALL flag, and proposed file content forever.

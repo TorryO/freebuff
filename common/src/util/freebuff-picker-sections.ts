@@ -8,9 +8,21 @@
  * `freebuff-picker-sections.test.ts` pins each one to the constant it names.
  * Catalog-only rows have no public id, so they are placed by their default
  * catalog key (`defaultCatalogKey`), which is opaque.
+ *
+ * SERVER-DRIVEN since 2026-10-07: the model catalog sends each row's place and
+ * the sections themselves (`placement`, `sections` in freebuff-model-catalog.ts),
+ * and every client draws what it is sent. What is compiled here is only the
+ * server's DEFAULT (default-config.ts builds the catalog's placements from it)
+ * and the fallback for a client talking to a server that sends none. Reorder by
+ * editing the catalog, not this file.
  */
 
-export type FreebuffPickerSectionId = 'unlimited' | 'optimized' | 'powerful'
+export type FreebuffPickerSectionId =
+  | 'unlimited'
+  | 'optimized'
+  | 'powerful'
+  // A section the server catalog defines.
+  | (string & {})
 
 export interface FreebuffPickerSection {
   id: FreebuffPickerSectionId
@@ -53,33 +65,58 @@ export interface FreebuffPickerPlacement {
 const PLACEMENTS: Readonly<Record<string, FreebuffPickerPlacement>> =
   Object.freeze({
     // Unlimited
-    'stealth/space-bunny-alpha': {
-      section: 'unlimited',
-      order: 10,
-      recommended: true,
-    },
+    // Glyph Cluster (2026-10-07): the section's first row, never under More.
+    'm-02244092cb': { section: 'unlimited', order: 5 }, // Glyph Cluster
     // Solar Pro 4 (2026-10-05): free as a promotion, moved from Optimized.
     'upstage/solar-pro4': { section: 'unlimited', order: 15 },
-    'upstage/solar-mini4': { section: 'unlimited', order: 20 },
     'm-916b95b337': { section: 'unlimited', order: 30, more: true }, // Ling 3.1 Flash
     'm-a273b5e513': { section: 'unlimited', order: 40, more: true }, // Laguna S 2.1
     // Optimized
+    // Solar Mini 4's free promotion ended on 2026-10-05.
+    'upstage/solar-mini4': { section: 'optimized', order: 5 },
     'mimo/mimo-v2.5': { section: 'optimized', order: 10, recommended: true }, // MiMo 2.6 Flash
     'z-ai/glm-5.3-flash': { section: 'optimized', order: 20 },
     'deepseek/deepseek-v4-flash': { section: 'optimized', order: 30 }, // V4.1 Flash
     // Powerful
-    // DeepSeek V4.1 Flash Fast (2026-10-04): the section's pick, first.
-    'deepseek/deepseek-v4-flash-fast': {
-      section: 'powerful',
-      order: 5,
-      recommended: true,
-    },
+    // Claude Haiku 5.5 (2026-10-07): first; paid plans, open in the US.
+    'm-79293c5b7d': { section: 'powerful', order: 1 }, // Claude Haiku 5.5
+    // DeepSeek V4.1 Flash Fast: no longer badged Recommended (2026-10-07).
+    'deepseek/deepseek-v4-flash-fast': { section: 'powerful', order: 5 },
     'meta/muse-spark-1.3-contributor': { section: 'powerful', order: 10 },
     'openai/gpt-6-luna': { section: 'powerful', order: 20 },
     'mimo/mimo-v2.6-pro': { section: 'powerful', order: 30 },
     'openai/gpt-6.1-sol': { section: 'powerful', order: 40 },
     'google/gemini-3.8-flash': { section: 'powerful', order: 50, more: true },
   })
+
+/** The compiled place of one id, if it has one: the server's default. */
+export function compiledFreebuffPickerPlacement(
+  id: string,
+): FreebuffPickerPlacement | undefined {
+  return PLACEMENTS[id]
+}
+
+/**
+ * A row's place: the server's, when it sent one for a section the picker
+ * draws, else the compiled place (`freebuffPickerPlacement`).
+ */
+export function freebuffRowPlacement(
+  server:
+    | { section: string; order: number; more?: boolean; recommended?: boolean }
+    | undefined,
+  sections: readonly FreebuffPickerSection[],
+  ids: readonly (string | undefined)[],
+  fallback: { premium: boolean; locked: boolean; price: number | undefined },
+): FreebuffPickerPlacement {
+  if (server && sections.some((section) => section.id === server.section))
+    return {
+      section: server.section,
+      order: server.order,
+      ...(server.more ? { more: true } : {}),
+      ...(server.recommended ? { recommended: true } : {}),
+    }
+  return freebuffPickerPlacement(ids, fallback)
+}
 
 /**
  * Where a row goes. `ids` are every name the row may be known by — its
@@ -117,9 +154,11 @@ export function freebuffPickerPlacement(
 export function freebuffPickerSections<T>(
   rows: readonly T[],
   placementOf: (row: T) => FreebuffPickerPlacement,
+  /** The server catalog's sections, when it sent them. */
+  sections: readonly FreebuffPickerSection[] = FREEBUFF_PICKER_SECTIONS,
 ): { section: FreebuffPickerSection; models: T[] }[] {
   const placed = rows.map((row) => ({ row, placement: placementOf(row) }))
-  return FREEBUFF_PICKER_SECTIONS.map((section) => ({
+  return sections.map((section) => ({
     section,
     models: placed
       .filter(({ placement }) => placement.section === section.id)

@@ -3,6 +3,18 @@ import type { FreebuffDesktopConcurrency } from '../constants/freebuff-model-ent
 import type { FreebuffStandingInfo } from '../constants/freebuff-standing'
 import { applyFreebucksPriceChanges } from '../util/freebuff-price-changes'
 
+/** Confirmed Freebucks returned to each original funding source. */
+export interface FreebuffFreebucksRefundSources {
+  daily: number
+  wallet: number
+}
+
+/** A settled session refund: the unused part of a purchased hour, returned
+ *  when the hour ended. `id` is stable, so a client can tell a new one. */
+export interface FreebuffFreebucksRefund extends FreebuffFreebucksRefundSources {
+  id: string
+}
+
 /**
  * Wire-level shapes returned by `/api/v1/freebuff/session`. Source of truth
  * for the CLI (which deserializes these) and the server (which serializes
@@ -32,7 +44,7 @@ export interface FreebuffSessionEntitlementBreakdown {
   promo?: number
   /**
    * Sessions added by the account's earned LEVEL
-   * (`common/constants/freebuff-levels.ts`). Omitted at level 0, which is
+   * (retired; `docs/freebuff-levels.md`). Omitted at level 0, which is
    * where every account starts, so the field is absent for most callers and an
    * older client that never reads it still sums to the right `limit` — the
    * server always sends the total.
@@ -279,6 +291,9 @@ export interface FreebuffFreebucksInfo {
   spend?: FreebuffFreebucksSpendCeiling
   /** @deprecated Legacy cap field; new servers omit it and clients ignore it. */
   monthly?: FreebuffFreebucksMonthlyAllowance
+  /** The account's most recent session refund from the last day. Clients
+   *  announce an id they have not seen before; the first snapshot is history. */
+  lastRefund?: FreebuffFreebucksRefund
   /** The plan the daily pool and bonus were sized from; null on free. */
   planId: string | null
   /** Session price per model id. Only models on the meter appear here. */
@@ -363,6 +378,9 @@ export interface FreebuffOffPeakPrice {
   weekendsOffPeak?: boolean
   price: number
   regularPrice: number
+  /** Why the price moves, as a clause after the hours: "when Freebuff is
+   *  quiet". Absent on older servers; the copy then gives hours alone. */
+  reason?: string
 }
 
 export interface FreebuffPriceChange {
@@ -843,9 +861,12 @@ export type FreebuffSessionAdmissionResponse = (
        *  client may also synthesize a no-grace `{ status: 'ended' }` when a
        *  poll reveals the row was swept. Both render the same UI. */
       status: 'ended'
-      /** Final early-end refund receipt, including zero; retries return the same amount. */
+      /** Final end receipt, including zero; retries return the same amount.
+       *  An end keeps the hour, so this is 0 unless the purchase already settled. */
       freebucksRefund?: number
-      /** Final usage is still outstanding; replay DELETE with the same instance for its receipt. */
+      /** The original funding sources restored by the confirmed refund. */
+      freebucksRefundSources?: FreebuffFreebucksRefundSources
+      /** Settlement is outstanding; replay DELETE with the same instance for its receipt. */
       freebucksRefundPending?: boolean
       accessTier?: FreebuffAccessTier
       instanceId?: string

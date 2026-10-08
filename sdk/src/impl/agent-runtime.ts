@@ -1,8 +1,10 @@
 import { trackEvent as trackCommonEvent } from '@codebuff/common/analytics'
+import { BYOK_LOCAL_USER_ID } from '@codebuff/common/constants/byok'
 import { env as clientEnvDefault } from '@codebuff/common/env'
 import { getCiEnv } from '@codebuff/common/env-ci'
 import { shouldTrackAnalyticsEvent } from '@codebuff/common/util/analytics-sampling'
 import { success } from '@codebuff/common/util/error'
+import { HostedServiceUnavailableError } from '@codebuff/agent-runtime/llm-api/codebuff-web-api'
 
 import { getWebsiteUrl } from '../constants'
 import type { ResolvedByokConnection } from '../byok'
@@ -120,7 +122,7 @@ export function getAgentRuntimeImpl(
 
     // Database
     getUserInfoFromApiKey: byok
-      ? async () => ({ id: 'byok-local' }) as any
+      ? async () => ({ id: BYOK_LOCAL_USER_ID }) as any
       : getUserInfoFromApiKey,
     // A BYOK run only uses its local agent registry. A missing local agent is
     // an error, never a reason to send its prompt or identity to Freebuff.
@@ -172,7 +174,7 @@ export function getAgentRuntimeImpl(
     // direct provider fetch constructed in model-provider.ts instead.
     fetch: byok
       ? (async () => {
-          throw new Error('Hosted service tools are unavailable in a direct BYOK run')
+          throw new HostedServiceUnavailableError('Hosted service tools are unavailable in a direct BYOK run')
         }) as unknown as typeof globalThis.fetch
       : globalThis.fetch,
 

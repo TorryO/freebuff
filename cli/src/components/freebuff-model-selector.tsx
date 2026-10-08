@@ -47,8 +47,9 @@ import {
   getFreebuffModelMeter,
 } from '@codebuff/common/util/freebuff-session-pools'
 import {
-  freebuffPickerPlacement,
+  FREEBUFF_PICKER_SECTIONS,
   freebuffPickerSections,
+  freebuffRowPlacement,
   type FreebuffPickerSectionId,
 } from '@codebuff/common/util/freebuff-picker-sections'
 import {
@@ -343,12 +344,16 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
     },
     [directory, catalog, session, accessTier, hasPaidSubscription, freebucks],
   )
-  // Desktop's sections. A catalog row's id is its key; placements name the
-  // compiled model it replaces.
+  // The server's sections and each row's place in them (catalog mode); the
+  // compiled layout only when the server sent none. A catalog row's id is its
+  // key; compiled placements name the compiled model it replaces.
+  const pickerSections = catalog?.sections ?? FREEBUFF_PICKER_SECTIONS
   const placementOf = useCallback(
     (model: FreebuffModelOption) => {
       const row = directory.row(model.id)
-      return freebuffPickerPlacement(
+      return freebuffRowPlacement(
+        row?.placement,
+        pickerSections,
         [row ? compiledFreebuffModelIdOfRow(row) : undefined, model.id],
         {
           premium: directory.isPremium(model.id),
@@ -357,7 +362,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         },
       )
     },
-    [directory, planRequired, freebucks],
+    [directory, planRequired, freebucks, pickerSections],
   )
   // Capacity-limited models the SERVER decided to offer on this response. The
   // client has no catalog of its own for these on purpose: when the wave's pool
@@ -397,10 +402,14 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
   const taglineFor = useCallback(
     (model: FreebuffModelOption) =>
       model.id === FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID ||
-      isFreebucksPeakModel(freebucks, model.id) || freebucks?.offPeak?.[model.id]
+      isFreebucksPeakModel(freebucks, model.id) ||
+      freebucks?.offPeak?.[model.id] ||
+      // The promotion's own pill says it; the notice would repeat it.
+      model.promotional ||
+      directory.row(model.id)?.badges.some((b) => b.kind === 'promotional')
         ? model.tagline
         : (freebucks?.priceNotices?.[model.id] ?? model.tagline),
-    [freebucks],
+    [freebucks, directory],
   )
   const referral = getReferralInfo(session)
   const meterFor = useCallback(
@@ -737,11 +746,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         // CTA line under it already carries "Get 7x usage for $5".
         const offer = upgradeOfferFor(model)
         if (offer) {
-          // The first clause of the server's copy ("DeepSeek V4.1 Flash drops
-          // to 15 Freebucks on a plan"): the whole tooltip is a sentence and a
-          // half, and this line sizes the card and is clipped, never wrapped.
-          const lead = offer.tooltip.split(' — ')[0] ?? offer.tooltip
-          return `${lead}. Enter opens plans.`
+          return `${offer.tooltip.replace(/\.$/, '')}. Enter opens plans.`
         }
         return `Not enough ${FREEBUCKS_LABEL} — ${freebucksPriceLabel(
           intent.price,
@@ -857,17 +862,18 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
       if (!catalog || model.id !== focusedId) return []
       const row = directory.row(model.id)
       if (!row) return []
+      const schedule = freebucksOffPeakCopy(freebucks, model.id)?.tooltip
       return [
         ...(row.taglineTooltip ? [row.taglineTooltip] : []),
-        ...row.badges.flatMap((badge) =>
-          badge.tooltip ? [`${badge.label}: ${badge.tooltip}`] : [],
-        ),
+        ...(schedule ? [schedule] : []),
+        // The pill's label is on the row just above; its tooltip alone.
+        ...row.badges.flatMap((badge) => (badge.tooltip ? [badge.tooltip] : [])),
         ...(row.access === 'locked' && row.lockedTooltip
           ? [row.lockedTooltip]
           : []),
       ]
     },
-    [catalog, directory, focusedId],
+    [catalog, directory, focusedId, freebucks],
   )
 
   // The referral banner contributes its GLM/copy actions to the selector's
@@ -895,7 +901,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
   // below is added on top and is visible in both states.
   const catalogSections = useMemo((): readonly Section[] => {
     if (!expanded) return []
-    return freebuffPickerSections(availableModels, placementOf).map(
+    return freebuffPickerSections(availableModels, placementOf, pickerSections).map(
       ({ section, models }): Section => ({
         key: section.id,
         label: section.label.toUpperCase(),
@@ -903,7 +909,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
         models,
       }),
     )
-  }, [expanded, availableModels, placementOf])
+  }, [expanded, availableModels, placementOf, pickerSections])
 
   // Every section that gets drawn, in draw order. THE single source for the
   // render, the navigation order and the height estimate — those three must
@@ -1565,7 +1571,7 @@ export const FreebuffModelSelector: React.FC<FreebuffModelSelectorProps> = ({
               {namePadding + taglineFor(model) + imagesSuffix}
             </span>
           )}
-          {model.isNew && (
+          {model.newBadge && (
             <span fg={theme.primary} attributes={TextAttributes.BOLD}>
               {' · NEW'}
             </span>

@@ -94,9 +94,35 @@ export const FREEBUFF_DESKTOP_ADMITTED_AT_HEADER =
 export const FREEBUFF_CLIENT_HEADER = 'x-freebuff-client'
 export const FREEBUFF_CLIENT_DESKTOP = 'desktop'
 
+/**
+ * The calling app's own version (`0.0.212`, `1.4.0`), sent by the CLI and
+ * Desktop on session calls. Observe-only: friction lines
+ * (`freebuff_session_refused`) carry it so a refusal can be tied to the build
+ * that saw it. Never gates anything; a client may omit it.
+ */
+export const FREEBUFF_CLIENT_VERSION_HEADER = 'x-freebuff-client-version'
+
 /** A random id Freebuff Desktop mints once per install and keeps across
  *  sign-ins. Not a credential. */
 export const FREEBUFF_INSTALL_ID_HEADER = 'x-freebuff-install-id'
+
+/**
+ * Whether Freebuff Desktop's window was in front of the user when a
+ * completions request left: `watching` (focused, recent input), `visible`
+ * (on screen, another app focused) or `away` (hidden, minimized, locked or
+ * idle). Omitted when the app cannot tell.
+ */
+export const FREEBUFF_ATTENTION_HEADER = 'x-freebuff-attention'
+export const FREEBUFF_ATTENTION_STATES = ['watching', 'visible', 'away'] as const
+export type FreebuffAttention = (typeof FREEBUFF_ATTENTION_STATES)[number]
+
+export function parseFreebuffAttention(
+  value: unknown,
+): FreebuffAttention | undefined {
+  return (FREEBUFF_ATTENTION_STATES as readonly unknown[]).includes(value)
+    ? (value as FreebuffAttention)
+    : undefined
+}
 
 /** Client-persisted identity for a possibly unacknowledged Desktop POST. */
 export const FREEBUFF_DESKTOP_ATTEMPT_HEADER = 'x-freebuff-desktop-attempt-id'

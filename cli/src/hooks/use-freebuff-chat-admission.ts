@@ -19,6 +19,7 @@ import {
   formatFreebucks,
 } from '../utils/freebucks'
 import type { FreebuffSessionResponse } from '../types/freebuff-session'
+import type { StreamStatus } from './use-message-queue'
 
 export function freebuffAdmissionNotice(
   session: FreebuffSessionResponse | null,
@@ -26,7 +27,7 @@ export function freebuffAdmissionNotice(
   if (!session) return null
   switch (session.status) {
     case 'banned':
-      return 'This account is suspended. If this is a mistake, contact support@codebuff.com.'
+      return 'This account is suspended. To appeal, visit https://freebuff.com/account?tab=standing. If this is a mistake, contact support@codebuff.com.'
     case 'country_blocked':
       return session.countryBlockReason === 'anonymous_network'
         ? `Freebuff detected ${formatFreebuffHardBlockedPrivacySignals(session.ipPrivacySignals)} traffic. Disable VPN, proxy or Tor traffic and try again.`
@@ -95,6 +96,29 @@ export async function beginFreebuffChatAdmission(admission: ChatAdmission) {
     })
   }
 }
+
+/**
+ * Admission buys an hour for the queue to spend, so it waits until the queue
+ * can spend it. A user-paused queue sends nothing: admitting for one bought
+ * an hour no turn started, which the server refunds after five minutes.
+ */
+export function freebuffChatAdmissionMayStart(queue: {
+  chainInProgress: boolean
+  streamStatus: StreamStatus
+  queuedCount: number
+  queuePaused: boolean
+}): boolean {
+  return (
+    !queue.chainInProgress &&
+    queue.streamStatus === 'idle' &&
+    queue.queuedCount > 0 &&
+    !queue.queuePaused
+  )
+}
+
+/** Shown while a requested admission waits on a paused queue. */
+export const FREEBUFF_ADMISSION_QUEUE_PAUSED_MESSAGE =
+  'Your queue is paused, so no session was started. Press Esc to put your message back in the draft and send it when you are ready.'
 
 /** The queue holds the submitted text and attachments while admission runs. */
 export function useFreebuffChatAdmission(enabled: boolean) {

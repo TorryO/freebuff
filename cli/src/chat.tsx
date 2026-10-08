@@ -89,6 +89,7 @@ import { DOCK_CHORD_HINT, useDockPanel } from './hooks/use-dock-panel'
 import { useInputHistory } from './hooks/use-input-history'
 import { usePublishMutation } from './hooks/use-publish-mutation'
 import { useSuggestionEngine } from './hooks/use-suggestion-engine'
+import { usePartnerSuggestion } from './hooks/use-partner-suggestion'
 import { useUsageMonitor } from './hooks/use-usage-monitor'
 import { WEBSITE_URL } from './login/constants'
 import { getProjectRoot, tryGetProjectRoot } from './project-files'
@@ -107,6 +108,15 @@ import { readClipboardImage } from './utils/clipboard-image'
 import { returnToFreebuffLanding } from './hooks/use-freebuff-session'
 import { END_SESSION_MESSAGE, IS_FREEBUFF } from './utils/constants'
 import { getSystemMessage } from './utils/message-history'
+import { ProfileSurveyBox } from './components/profile-survey-box'
+import {
+  closeProfileSurveyForTyping,
+  dispatchProfileSurveyInput,
+  isProfileSurveyOnScreen,
+  setProfileSurveyEligible,
+  setProfileSurveyPrinter,
+  startProfileSurveyOnce,
+} from './state/profile-survey-store'
 import { getInputModeConfig } from './utils/input-modes'
 import { sealInputProfile, withPasteCount } from './utils/input-profile'
 import {
@@ -807,7 +817,7 @@ export const Chat = ({
     slashMatches,
     agentMatches,
     fileMatches,
-    slashSuggestionItems,
+    slashSuggestionItems: slashCommandItems,
     agentSuggestionItems,
     fileSuggestionItems,
   } = useSuggestionEngine({
@@ -852,15 +862,6 @@ export const Chat = ({
     }
     setSlashSelectedIndex(0)
   }, [slashContext.active, slashContext.query, setSlashSelectedIndex])
-
-  useEffect(() => {
-    if (slashMatches.length > 0 && slashSelectedIndex >= slashMatches.length) {
-      setSlashSelectedIndex(slashMatches.length - 1)
-    }
-    if (slashMatches.length === 0 && slashSelectedIndex !== 0) {
-      setSlashSelectedIndex(0)
-    }
-  }, [slashMatches.length, slashSelectedIndex, setSlashSelectedIndex])
 
   useEffect(() => {
     if (!mentionContext.active) {
@@ -1232,6 +1233,27 @@ export const Chat = ({
       })),
     )
 
+  const slashSuggestionItems = usePartnerSuggestion({
+    items: slashCommandItems,
+    selectedIndex: slashSelectedIndex,
+    setSelectedIndex: setSlashSelectedIndex,
+    maxVisible: isCompactHeight ? 5 : terminalHeight > 35 ? 15 : 10,
+    enabled:
+      showInlineAds && slashContext.active &&
+      !getInputModeConfig(inputMode).disableSlashSuggestions &&
+      !feedbackMode && !publishMode && !reviewMode && !queuePanelOpen &&
+      askUserState === null,
+  })
+
+  useEffect(() => {
+    if (slashSuggestionItems.length > 0 && slashSelectedIndex >= slashSuggestionItems.length) {
+      setSlashSelectedIndex(slashSuggestionItems.length - 1)
+    }
+    if (slashSuggestionItems.length === 0 && slashSelectedIndex !== 0) {
+      setSlashSelectedIndex(0)
+    }
+  }, [slashSuggestionItems.length, slashSelectedIndex, setSlashSelectedIndex])
+
   // Review and ask_user take the composer's place too. Leaving the panel
   // flagged open behind them would keep chat's keyboard disabled with nothing
   // rendered to handle keys, so hand the surface back for real.
@@ -1346,7 +1368,12 @@ export const Chat = ({
   // Click handler for slash menu items - executes command or inserts text
   const handleSlashItemClick = useCallback(
     async (index: number) => {
-      const selected = slashMatches[index]
+      const item = slashSuggestionItems[index]
+      if (item?.activate) {
+        item.activate()
+        return
+      }
+      const selected = slashMatches.find((command) => command.id === item?.id)
       if (!selected) return
 
       // If the command has insertText, insert it instead of executing
@@ -1361,6 +1388,7 @@ export const Chat = ({
     },
     [
       slashMatches,
+      slashSuggestionItems,
       applySlashInsertText,
       setSlashSelectedIndex,
       onSubmitPrompt,
@@ -1535,7 +1563,7 @@ export const Chat = ({
     lastEditDueToNav ||
     (cursorPosition === inputValue.length &&
       ((slashContext.active &&
-        slashSelectedIndex === slashMatches.length - 1) ||
+        slashSelectedIndex === slashSuggestionItems.length - 1) ||
         (mentionContext.active &&
           agentSelectedIndex === totalMentionMatches - 1) ||
         (!slashContext.active && !mentionContext.active)))
@@ -1555,7 +1583,7 @@ export const Chat = ({
       mentionMenuActive: mentionContext.active,
       slashSelectedIndex,
       agentSelectedIndex,
-      slashMatchesLength: slashMatches.length,
+      slashMatchesLength: slashSuggestionItems.length,
       totalMentionMatches: agentMatches.length + fileMatches.length,
       disableSlashSuggestions:
         getInputModeConfig(inputMode).disableSlashSuggestions,
@@ -1581,7 +1609,7 @@ export const Chat = ({
       mentionContext.active,
       slashSelectedIndex,
       agentSelectedIndex,
-      slashMatches.length,
+      slashSuggestionItems.length,
       agentMatches.length,
       fileMatches.length,
       historyNavUpEnabled,
@@ -1613,7 +1641,12 @@ export const Chat = ({
       onSlashMenuDown: () => setSlashSelectedIndex((prev) => prev + 1),
       onSlashMenuUp: () => setSlashSelectedIndex((prev) => prev - 1),
       onSlashMenuSelect: async () => {
-        const selected = slashMatches[slashSelectedIndex] || slashMatches[0]
+        const item = slashSuggestionItems[slashSelectedIndex]
+        if (item?.activate) {
+          item.activate()
+          return
+        }
+        const selected = slashMatches.find((command) => command.id === item?.id)
         if (!selected) return
 
         // If the command has insertText, insert it instead of executing
@@ -1629,7 +1662,10 @@ export const Chat = ({
       },
       onSlashMenuComplete: () => {
         // Complete the word without executing - same as clicking on the item
-        const selected = slashMatches[slashSelectedIndex] || slashMatches[0]
+        const item = slashSuggestionItems[slashSelectedIndex]
+        // Tab completes commands; only an explicit Enter or click opens an ad.
+        if (item?.activate) return
+        const selected = slashMatches.find((command) => command.id === item?.id)
         if (!selected || slashContext.startIndex < 0) return
 
         // If the command has insertText, insert it instead of the command
@@ -1816,6 +1852,7 @@ export const Chat = ({
         if (!dockProposal) return
         handleSponsoredProposalMenu(dockProposal.target, !dockProposal.menuOpen)
       },
+      onProfileSurveyInput: dispatchProfileSurveyInput,
     }),
     [
       dockPanel,
@@ -1827,6 +1864,7 @@ export const Chat = ({
       setInputValue,
       setSlashSelectedIndex,
       slashMatches,
+      slashSuggestionItems,
       slashSelectedIndex,
       slashContext,
       inputValue,
@@ -1979,7 +2017,10 @@ export const Chat = ({
       : mentionsLaunchKeyword(inputValue)
         ? CLI_PARTNER_PLACEMENT_IDS.composerLaunch
         : null
-  const showComposerPartnerAd = composerPartnerPlacementId !== null
+  const normalGreptileVisible =
+    !dockProposal && showInlineAds && ads?.[0]?.partnerBrand === 'greptile'
+  const showComposerPartnerAd = composerPartnerPlacementId !== null &&
+    !(composerPartnerPlacementId === CLI_PARTNER_PLACEMENT_IDS.composer && normalGreptileVisible)
 
   // Show first-time onboarding starter prompts only on a pristine, idle,
   // empty-input default-mode chat — and never while a menu/overlay is up.
@@ -2092,6 +2133,34 @@ export const Chat = ({
   useEffect(() => {
     if (dockTakeoverActive) dockPanel.collapse('outside')
   }, [dockTakeoverActive, dockPanel])
+
+  // THE PROFILE SURVEY BOX (COD-779): Freebuff only, only while a turn is
+  // running, only over an empty default-mode draft with no takeover screen
+  // up. The first busy turn of the process fetches it once. Typing a prompt
+  // while it is up closes it silently (answers stay server-side). Its keys
+  // are routed in `keyboard-actions.ts`; it reports nothing to the ad rail.
+  const isTurnBusy = isStreaming || isWaitingForResponse
+  const profileSurveyEligible =
+    IS_FREEBUFF &&
+    isTurnBusy &&
+    inputMode === 'default' &&
+    inputValue.length === 0 &&
+    !feedbackMode &&
+    !publishMode &&
+    !dockTakeoverActive
+  const hasDraft = inputValue.length > 0
+  useEffect(() => {
+    if (IS_FREEBUFF && isTurnBusy) void startProfileSurveyOnce()
+  }, [isTurnBusy])
+  useEffect(() => {
+    if (hasDraft && isProfileSurveyOnScreen()) closeProfileSurveyForTyping()
+    setProfileSurveyEligible(profileSurveyEligible)
+  }, [hasDraft, profileSurveyEligible])
+  useEffect(() => {
+    setProfileSurveyPrinter((text) =>
+      setMessages((prev) => [...prev, getSystemMessage(text)]),
+    )
+  }, [setMessages])
 
   const shouldShowStatusLine =
     !feedbackMode &&
@@ -2268,6 +2337,9 @@ export const Chat = ({
           </box>
         )}
 
+        {/* Beside the ad surfaces above, never in place of one. */}
+        {IS_FREEBUFF && <ProfileSurveyBox width={separatorWidth} />}
+
         {IS_FREEBUFF &&
           !freebuffControlsOpen &&
           freebuffAdmissionNotice(freebuffSession) && (
@@ -2347,7 +2419,6 @@ export const Chat = ({
               agentSelectedIndex={agentSelectedIndex}
               onSlashItemClick={handleSlashItemClick}
               onMentionItemClick={handleMentionItemClick}
-              showSlashPartnerAd={showInlineAds}
               theme={theme}
               terminalHeight={terminalHeight}
               separatorWidth={separatorWidth}

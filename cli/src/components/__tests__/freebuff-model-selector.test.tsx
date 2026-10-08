@@ -587,7 +587,7 @@ describe('FreebuffModelSelector tier layout', () => {
     expect(frame).toContain('UNLIMITED · Experimental models')
   })
 
-  test("on the meter, rows sit in Desktop's sections, each section's pick marked Recommended", async () => {
+  test("on the meter, rows sit in Desktop's sections, Optimized's pick marked Recommended", async () => {
     useFreebuffSessionStore.getState().setSession({
       status: 'none',
       accessTier: 'full',
@@ -601,7 +601,7 @@ describe('FreebuffModelSelector tier layout', () => {
       lines.findIndex((line) => line.includes('│') && line.includes(name))
     const order = [
       lines.findIndex((line) => line.startsWith('UNLIMITED · Experimental models')),
-      cardLine('Space Bunny Alpha'),
+      cardLine('Solar Pro 4'),
       lines.findIndex((line) => line.startsWith('OPTIMIZED · Strongest')),
       cardLine('MiMo 2.6 Flash'),
       lines.findIndex((line) => line.startsWith('POWERFUL · Frontier')),
@@ -610,14 +610,15 @@ describe('FreebuffModelSelector tier layout', () => {
     ]
     expect(order.every((at) => at >= 0)).toBe(true)
     expect(order).toEqual([...order].sort((a, b) => a - b))
-    for (const name of [
-      'Space Bunny Alpha',
-      'MiMo 2.6 Flash',
-      ...(FREEBUFF_ENABLE_FAST_MODE_IN_UI ? ['DeepSeek V4.1 Flash Fast'] : []),
-    ]) {
-      expect(lines[cardLine(name) + 1]).toContain('Recommended')
+    expect(lines[cardLine('MiMo 2.6 Flash') + 1]).toContain('Recommended')
+    // Flash Fast is not badged Recommended since 2026-10-07.
+    if (FREEBUFF_ENABLE_FAST_MODE_IN_UI) {
+      expect(lines[cardLine('DeepSeek V4.1 Flash Fast') + 1]).not.toContain('Recommended')
     }
     expect(lines[cardLine('GPT-6 Luna') + 1]).not.toContain('Recommended')
+    expect(lines[cardLine('Solar Pro 4') + 1]).not.toContain('Recommended')
+    // Withdrawn 2026-10-06.
+    expect(cardLine('Space Bunny Alpha')).toBe(-1)
   })
 
   test('lists the paid-only row to a free account, locked', async () => {
@@ -744,8 +745,8 @@ describe('FreebuffModelSelector tier layout', () => {
     // border, padding the card out by ~17 columns of empty space. What remains
     // is ordinary slack from the widest row in the set.
     //
-    // So this bound tracks the WIDEST ROW, not the hero's own content, and it
-    // moves whenever any row in the set grows. It went 10 -> 14 when GLM 5.3
+    // So this bound tracks the WIDEST ROW, and it moves whenever any row in
+    // the set grows. It went 10 -> 14 when GLM 5.3
     // Flash gained a reasoning ladder, which widens its row two different ways:
     // a model with a pinned `reasoningEffort` shows ` · Reasoning: <rung>`, and
     // a model the user has picked a rung for shows ` · Reasoning: <rung>*`
@@ -759,8 +760,18 @@ describe('FreebuffModelSelector tier layout', () => {
     // fail if the reserved gutter ever comes back, which is the only thing this
     // assertion is really guarding. Widen it again only for a real content
     // change, and check WHICH row got wider before you do.
-    const gapToBorder =
-      heroRow.length - 1 - (heroRow.indexOf('NEW') + 'NEW'.length)
+    // Measured on the WIDEST row (the smallest gap of any card line), not the
+    // hero's: NEW now marks only the row a release announces, so the hero is
+    // no longer the row that sets the width.
+    const gapToBorder = Math.min(
+      ...frame
+        .split('\n')
+        .map((line) => line.trimEnd())
+        .filter((line) => line.startsWith('│') && line.endsWith('│'))
+        .map((line) => line.slice(1, -1))
+        .filter((inner) => inner.trim())
+        .map((inner) => inner.length - inner.trimEnd().length),
+    )
     expect(heroRow.endsWith('│')).toBe(true)
     expect(gapToBorder).toBeLessThan(14)
   })

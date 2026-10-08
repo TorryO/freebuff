@@ -13,14 +13,13 @@ import { InputModeBanner } from './input-mode-banner'
 import { MultilineInput, type MultilineInputHandle } from './multiline-input'
 import { OutOfCreditsBanner } from './out-of-credits-banner'
 import { PublishContainer } from './publish-container'
-import { PartnerAdLine } from './partner-ad-line'
 import { SuggestionMenu, type SuggestionItem } from './suggestion-menu'
-import { CLI_PARTNER_PLACEMENT_IDS } from '../ads/partner-ads'
 import { useAskUserBridge } from '../hooks/use-ask-user-bridge'
 import { useEvent } from '../hooks/use-event'
 import { tryGetProjectRoot } from '../project-files'
 import { useChatStore } from '../state/chat-store'
 import { shouldInterceptChatInputKey } from '../utils/chat-input-key-intercept'
+import { getProfileSurveyKeyContext } from '../state/profile-survey-store'
 import { getInputModeConfig } from '../utils/input-modes'
 import { recordTypedInput } from '../utils/input-profile'
 import { BORDER_CHARS } from '../utils/ui-constants'
@@ -60,13 +59,6 @@ interface ChatInputBarProps {
   agentSelectedIndex: number
   onSlashItemClick?: (index: number) => void
   onMentionItemClick?: (index: number) => void
-  /**
-   * Whether the PARTNER row under `/review` may be drawn — the same gate the
-   * rotating card above the input reads (ads on, no BYOK connection, free
-   * mode or no subscription). The row itself draws nothing unless the deal is
-   * live and the slot filled.
-   */
-  showSlashPartnerAd?: boolean
 
   // Layout
   theme: Theme
@@ -114,7 +106,6 @@ export const ChatInputBar = ({
   agentSelectedIndex,
   onSlashItemClick,
   onMentionItemClick,
-  showSlashPartnerAd = false,
   theme,
   terminalHeight,
   separatorWidth,
@@ -155,30 +146,6 @@ export const ChatInputBar = ({
   const askUserState = useChatStore((state) => state.askUserState)
   const hasAnyPreview = hasSuggestionMenu
 
-  /**
-   * The partner row under `/review`, as the menu's `afterItem`.
-   *
-   * Built once and handed to both layouts, so the compact and bordered menus
-   * cannot disagree about whether the slot exists. `SuggestionMenu` draws it
-   * only while `review` is in its visible window, which is what keeps the
-   * request to the one time the command is actually on screen.
-   *
-   * The width is the menu's own (`terminalWidth - 8`, expressed against
-   * `separatorWidth`), so the fill spans exactly the rows above it.
-   */
-  const slashPartnerAd = showSlashPartnerAd
-    ? {
-        id: 'review',
-        node: (
-          <PartnerAdLine
-            key="partner-review"
-            placementId={CLI_PARTNER_PLACEMENT_IDS.slashReview}
-            width={Math.max(10, separatorWidth - 6)}
-          />
-        ),
-      }
-    : undefined
-
   // In the home directory (or an ancestor) the file tree is only scanned a few
   // levels deep, so tell the user why deeper files don't show up.
   const mentionMenuFooter = isShallowScanRoot(tryGetProjectRoot())
@@ -208,6 +175,7 @@ export const ChatInputBar = ({
         lastEditDueToNav: draft.lastEditDueToNav,
         cursorPosition: draft.cursorPosition,
         inputLength: draft.inputValue.length,
+        profileSurvey: getProfileSurveyKeyContext(),
       })
     },
   )
@@ -348,7 +316,6 @@ export const ChatInputBar = ({
             maxVisible={5}
             prefix="/"
             onItemClick={onSlashItemClick}
-            afterItem={slashPartnerAd}
           />
         ) : null}
         {hasMentionSuggestions ? (
@@ -467,7 +434,6 @@ export const ChatInputBar = ({
             maxVisible={normalModeMaxVisible}
             prefix="/"
             onItemClick={onSlashItemClick}
-            afterItem={slashPartnerAd}
           />
         ) : null}
         {hasMentionSuggestions ? (

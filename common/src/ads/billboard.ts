@@ -1,3 +1,4 @@
+import { desktopPlacementSource } from './web-desktop-placements'
 /**
  * BILLBOARDS: Desktop's full-bleed image placements, shared by the serving
  * side (which artwork a creative must carry to fill a slot), the asset
@@ -51,6 +52,43 @@ export const BILLBOARD_DISMISS_LOCK_MS = 10_000
 /** A pause in typing/clicking that may open a closed panel for its billboard. */
 export const BILLBOARD_PANEL_IDLE_MS = 3_000
 
+export type BillboardFrequencyCap = {
+  /** Whose serves share one count: the campaign's, or a single ad's. */
+  per: 'campaign' | 'ad'
+  /** Every limit must have room. The first is the slot's daily allowance. */
+  limits: readonly { maxImpressions: number; windowMs: number }[]
+}
+
+const HOUR_MS = 60 * 60_000
+const DAY_MS = 24 * HOUR_MS
+
+/**
+ * The frequency cap on each billboard slot, per user. It REPLACES the
+ * campaign's own cap and the hourly ad and advertiser caps for these serves,
+ * which count serves rather than screen time: a billboard stays up for up to
+ * {@link BILLBOARD_REFRESH_MS}, so an hourly cap still let one campaign hold
+ * the sidebar all day. Billboard serves therefore do not spend the
+ * campaign's hourly cap on its other placements either.
+ *
+ * - The sidebar serves each campaign 3 times a rolling day, at most once an
+ *   hour, so a day's allowance cannot all land in one sitting.
+ * - The panel takes over the right panel, so the same ad opens it at most
+ *   once a day.
+ */
+export const BILLBOARD_FREQUENCY_CAPS: Readonly<Record<string, BillboardFrequencyCap>> = {
+  [BILLBOARD_SIDEBAR_PLACEMENT_ID]: {
+    per: 'campaign',
+    limits: [
+      { maxImpressions: 3, windowMs: DAY_MS },
+      { maxImpressions: 1, windowMs: HOUR_MS },
+    ],
+  },
+  [BILLBOARD_PANEL_PLACEMENT_ID]: {
+    per: 'ad',
+    limits: [{ maxImpressions: 1, windowMs: DAY_MS }],
+  },
+}
+
 export type BillboardAsset = { url: string; width: number; height: number }
 export type BillboardAssets = Partial<Record<BillboardShape, BillboardAsset>>
 
@@ -58,8 +96,8 @@ export type BillboardAssets = Partial<Record<BillboardShape, BillboardAsset>>
 export function billboardShapesForPlacement(
   placementId: string,
 ): readonly BillboardShape[] {
-  if (placementId === BILLBOARD_SIDEBAR_PLACEMENT_ID) return ['sidebar']
-  if (placementId === BILLBOARD_PANEL_PLACEMENT_ID)
+  if (desktopPlacementSource(placementId) === BILLBOARD_SIDEBAR_PLACEMENT_ID) return ['sidebar']
+  if (desktopPlacementSource(placementId) === BILLBOARD_PANEL_PLACEMENT_ID)
     return ['panel_tall', 'panel_portrait', 'panel_square', 'panel_landscape']
   return []
 }

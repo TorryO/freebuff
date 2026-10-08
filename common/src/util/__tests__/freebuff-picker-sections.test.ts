@@ -19,8 +19,10 @@ import {
 } from '../../constants/freebuff-models'
 import {
   FREEBUFF_PICKER_PLACED_IDS,
+  FREEBUFF_PICKER_SECTIONS,
   freebuffPickerPlacement,
   freebuffPickerSections,
+  freebuffRowPlacement,
 } from '../freebuff-picker-sections'
 
 const none = { premium: false, locked: false, price: undefined }
@@ -28,9 +30,8 @@ const none = { premium: false, locked: false, price: undefined }
 describe('freebuffPickerPlacement', () => {
   test('literal ids are the catalog constants', () => {
     const at = (id: string) => freebuffPickerPlacement([id], none)
-    expect(at(FREEBUFF_SPACE_BUNNY_ALPHA_MODEL_ID)).toMatchObject({ section: 'unlimited', recommended: true })
     expect(at(FREEBUFF_SOLAR_PRO_4_MODEL_ID)).toEqual({ section: 'unlimited', order: expect.any(Number) })
-    expect(at(FREEBUFF_SOLAR_MINI_4_MODEL_ID).section).toBe('unlimited')
+    expect(at(FREEBUFF_SOLAR_MINI_4_MODEL_ID).section).toBe('optimized')
     expect(at(FREEBUFF_MIMO_V25_MODEL_ID)).toMatchObject({ section: 'optimized', recommended: true })
     expect(at(FREEBUFF_GLM_V53_FLASH_MODEL_ID).section).toBe('optimized')
     expect(at(FREEBUFF_DEEPSEEK_V4_FLASH_MODEL_ID).section).toBe('optimized')
@@ -43,7 +44,8 @@ describe('freebuffPickerPlacement', () => {
       expect(at(id)).toEqual({ section: 'powerful', order: expect.any(Number) })
     }
     expect(at(FREEBUFF_GEMINI_38_FLASH_MODEL_ID)).toMatchObject({ section: 'powerful', more: true })
-    expect(at(FREEBUFF_DEEPSEEK_V4_FLASH_FAST_MODEL_ID)).toEqual({ section: 'powerful', order: 5, recommended: true })
+    // Not badged Recommended since 2026-10-07: Optimized's MiMo is the one pick.
+    expect(at(FREEBUFF_DEEPSEEK_V4_FLASH_FAST_MODEL_ID)).toEqual({ section: 'powerful', order: 5 })
   })
 
   test('every listed compiled model has an explicit place', () => {
@@ -91,6 +93,50 @@ describe('freebuffPickerSections', () => {
           FREEBUFF_GEMINI_38_FLASH_MODEL_ID,
         ],
       ],
+    ])
+  })
+})
+
+describe('freebuffRowPlacement', () => {
+  test('the server’s place wins for a section the picker draws', () => {
+    expect(
+      freebuffRowPlacement(
+        { section: 'powerful', order: 0, recommended: true },
+        FREEBUFF_PICKER_SECTIONS,
+        [FREEBUFF_MIMO_V25_MODEL_ID],
+        none,
+      ),
+    ).toEqual({ section: 'powerful', order: 0, recommended: true })
+  })
+
+  test('no server place, or a section the picker does not have: the compiled place', () => {
+    const compiled = freebuffPickerPlacement([FREEBUFF_MIMO_V25_MODEL_ID], none)
+    expect(
+      freebuffRowPlacement(undefined, FREEBUFF_PICKER_SECTIONS, [FREEBUFF_MIMO_V25_MODEL_ID], none),
+    ).toEqual(compiled)
+    expect(
+      freebuffRowPlacement(
+        { section: 'gone', order: 0 },
+        FREEBUFF_PICKER_SECTIONS,
+        [FREEBUFF_MIMO_V25_MODEL_ID],
+        none,
+      ),
+    ).toEqual(compiled)
+  })
+
+  test('sections are drawn in the order the server sends them', () => {
+    const sections = [
+      { id: 'b', label: 'B', tooltip: '' },
+      { id: 'a', label: 'A', tooltip: '' },
+    ]
+    const grouped = freebuffPickerSections(
+      ['x', 'y'],
+      (id) => ({ section: id === 'x' ? 'a' : 'b', order: 0 }),
+      sections,
+    )
+    expect(grouped.map(({ section, models }) => [section.id, models])).toEqual([
+      ['b', ['y']],
+      ['a', ['x']],
     ])
   })
 })

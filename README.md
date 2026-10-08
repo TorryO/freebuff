@@ -37,12 +37,11 @@ Freebuff includes a curated model catalog. The regular picker currently offers:
 | **MiMo 2.6 Flash**          | Full and limited access | The default everywhere; balanced performance with image support   |
 | **GLM 5.3 Flash**           | Full and limited access | Deepest reasoning, unmetered                                      |
 | **DeepSeek V4.1 Flash** | Full and limited access | Fast coding and tool use, unmetered                               |
-| **DeepSeek V4.1 Flash Fast** | Full access        | Fast mode: the same model on DeepSeek's own API, splitting work across parallel subagents and verifying the result; priced on DeepSeek's peak and off-peak hours |
+| **DeepSeek V4.1 Flash Fast** | Full access; paid plans at limited access | Fast mode: the same model on DeepSeek's own API, splitting work across parallel subagents and verifying the result; priced on DeepSeek's peak and off-peak hours |
 | **GPT-6 Luna**              | Full access             | Strong all-around with native images; runs on OpenAI flex capacity |
 | **MiMo 2.6 Pro**            | Full access             | Xiaomi's stronger reasoning model, with image support |
 | **Solar Mini 4**            | Full and limited access | Upstage's fast, compact model; 524K context, text only |
 | **Solar Pro 4**             | Full and limited access | Upstage's larger, stronger model; 524K context, text only |
-| **Space Bunny Alpha**       | Full access             | Beta. A stealth model from an anonymous provider that retains prompts; 1M context, images |
 | **Gemini 3.8 Flash**        | Paid plans              | 1M context, and the only model that accepts audio, video and PDF |
 | **Muse Spark 1.3**          | Paid plans              | Meta's agentic coding model; 1M context. When it is busy or unavailable, it answers on DeepSeek V4.1 Flash rather than making you wait |
 | **GPT-6.1 Sol**             | US, or paid plans elsewhere | OpenAI's flagship at a temporary promotional price, one session a day for every account; 1M context, images |
@@ -70,7 +69,7 @@ Freebuff uses specialized agents instead of sending every task through one model
 
 ## Free access
 
-Freebuff is available in every country. Supported regions receive full access; other regions and VPN users receive limited access to GLM 5.3 Flash, DeepSeek V4.1 Flash, MiMo 2.6 Flash, Solar Mini 4, Solar Pro 4, and Space Bunny Alpha. Every model is paid for in Freebucks at the price shown in the picker. The free limited-access allowance is 25 Freebucks a day, or 20 on a VPN or proxy, spent first on every model, GLM included; earned Freebucks go into your wallet and are used after it.
+Freebuff is available in every country. Supported regions receive full access; other regions and VPN users receive limited access to GLM 5.3 Flash, DeepSeek V4.1 Flash, MiMo 2.6 Flash, Solar Mini 4, and Solar Pro 4. Every model is paid for in Freebucks at the price shown in the picker. The free limited-access allowance is 25 Freebucks a day, or 20 on a VPN or proxy, spent first on every model, GLM included; earned Freebucks go into your wallet and are used after it.
 
 Text ads support the included models. Freebuff shows the applicable session limits and any model-specific data-use notice before you start.
 

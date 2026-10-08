@@ -52,18 +52,24 @@ export const STREAM_RECOVERY_EVENT = 'stream_recovery' as const
  *  replace a file with a cut-off copy of itself. Content-free: sizes, tool and
  *  model names only, never a path or file content. */
 export const FILE_WRITE_GUARD_EVENT = 'file_write_guard' as const
-/** Model-based context compaction failed and the runtime fell back to the
- *  mechanical pass (packages/agent-runtime/src/model-compaction.ts). The SDK
- *  is otherwise silent in the Web/Cloud runner, so without an allowlisted
- *  event a summarizer failure is invisible there. Content-free: the error is
- *  reduced to a fixed `error_kind`, never its message. */
-export const MODEL_COMPACTION_FALLBACK_EVENT =
-  'model_compaction.fallback' as const
-/** A model handoff was installed. The denominator for the fallback rate:
- *  'Context compaction completed' counts the fallback's own mechanical pass,
- *  so it cannot serve. Content-free sizes and labels only. */
-export const MODEL_COMPACTION_COMPLETED_EVENT =
-  'model_compaction.completed' as const
+/** A compaction the mechanical pass did not apply: it threw (the live request
+ *  alone over budget) or could not shrink the history. Content-free: a fixed
+ *  `error_kind`, never the message. */
+export const MECHANICAL_COMPACTION_SKIPPED_EVENT =
+  'mechanical_compaction.skipped' as const
+/** The runtime's mechanical compaction (packages/agent-runtime/src/compact-history.ts).
+ *  Shares its field names
+ *  with `context_pruning.completed`. Content-free sizes and counts only. */
+export const CONTEXT_COMPACTION_COMPLETED_EVENT =
+  'context_compaction_completed' as const
+/** The runtime reminded a model that its to-do list had not moved for several
+ *  tool calls (packages/agent-runtime/src/util/todo-progress-reminder.ts).
+ *  Counts and labels only, never the to-dos or a user id. */
+export const TODO_PROGRESS_REMINDER_EVENT = 'todo_progress_reminder' as const
+/** One per compaction window, closed by the next compaction or the run's end:
+ *  how much the run read after compacting, and how many of those reads were
+ *  files whose contents the compaction dropped. Counts only, never a path. */
+export const COMPACTION_FOLLOWUP_EVENT = 'context_compaction.followup' as const
 export const ADS_FETCH_COMPLETED_EVENT = AnalyticsEvent.ADS_FETCH_COMPLETED
 export const ADS_FIRST_PARTY_DECISION_EVENT =
   AnalyticsEvent.ADS_FIRST_PARTY_DECISION
@@ -237,26 +243,71 @@ const FILE_WRITE_GUARD_FIELDS = {
   openBrackets: 'number',
 } as const satisfies AxiomOnlyFieldSchema
 
-const MODEL_COMPACTION_FALLBACK_FIELDS = {
+const MECHANICAL_COMPACTION_SKIPPED_FIELDS = {
   model: 'string',
   agent_run_id: 'string',
   trigger_reason: 'string',
+  /** `no_shrink`, `over_budget` (the live request alone does not fit) or `error`. */
   error_kind: 'string',
   error_name: 'string',
-  fallback_applied: 'boolean',
-  fallback_failed: 'boolean',
+  context_token_count: 'number',
+  max_context_length: 'number',
 } as const satisfies AxiomOnlyFieldSchema
 
-const MODEL_COMPACTION_COMPLETED_FIELDS = {
-  model: 'string',
+const CONTEXT_COMPACTION_COMPLETED_FIELDS = {
   agent_run_id: 'string',
   trigger_reason: 'string',
-  summary_source: 'string',
-  summary_tokens: 'number',
-  summary_budget: 'number',
-  sections: 'number',
-  pre_tokens: 'number',
+  context_token_count: 'number',
+  max_context_length: 'number',
+  cache_gap_ms: 'number',
+  cache_expiry_ms: 'number',
+  cache_expiry_min_tokens: 'number',
+  message_count: 'number',
+  mid_turn: 'boolean',
+  user_budget: 'number',
+  assistant_tool_budget: 'number',
+  previous_summary_entry_count: 'number',
+  user_entry_count: 'number',
+  dropped_user_entry_count: 'number',
+  assistant_tool_entry_count: 'number',
+  dropped_assistant_tool_entry_count: 'number',
+  newest_entry_forced: 'boolean',
+  live_user_prompt_found: 'boolean',
+  summary_estimated_tokens: 'number',
+  budget_dropped_summary_parts: 'number',
+  preserved_fresh_messages: 'number',
+  /** Files re-provided whole, files left as an outline stub, and their size. */
+  working_set_files: 'number',
+  working_set_stubs: 'number',
+  working_set_tokens: 'number',
   post_tokens: 'number',
+} as const satisfies AxiomOnlyFieldSchema
+
+const COMPACTION_FOLLOWUP_FIELDS = {
+  agent_run_id: 'string',
+  model: 'string',
+  trigger_reason: 'string',
+  /** `compaction` (the next one) or `run_end`. */
+  ended_by: 'string',
+  next_trigger_reason: 'string',
+  /** Distinct files read before the compaction whose results it dropped. */
+  elided_read_paths: 'number',
+  read_calls_after: 'number',
+  read_paths_after: 'number',
+  /** Distinct `elided_read_paths` read again inside the window. */
+  reread_paths: 'number',
+  read_tokens_after: 'number',
+  tool_calls_after: 'number',
+  window_ms: 'number',
+} as const satisfies AxiomOnlyFieldSchema
+
+const TODO_PROGRESS_REMINDER_FIELDS = {
+  model: 'string',
+  agentId: 'string',
+  runId: 'string',
+  done: 'number',
+  total: 'number',
+  callsSinceUpdate: 'number',
 } as const satisfies AxiomOnlyFieldSchema
 
 const ADS_FETCH_COMPLETED_FIELDS = {
@@ -326,6 +377,16 @@ const ADS_FETCH_COMPLETED_FIELDS = {
    */
   ad_features_lookup: 'string',
   ad_features_ms: 'number',
+  /**
+   * The pclick SHADOW (`pclick-shadow.ts`) for the request's first shadow
+   * decision, as known on the serve path; absent when none ran:
+   * `pclick_shadow_outcome` (`pending` once the call to the pclick-scorer
+   * service is started) and `pclick_shadow_inputs` (feature store or
+   * no-history defaults). The scores land after the response; they ride the
+   * decision to the training log.
+   */
+  pclick_shadow_outcome: 'string',
+  pclick_shadow_inputs: 'string',
   /**
    * The eligibility census: two counts and two producer-encoded histogram
    * strings. `eligible_campaign_labels` comma-joins opaque allocation labels
@@ -605,6 +666,23 @@ const ADS_FIRST_PARTY_DECISION_FIELDS = {
   ranker_fatigue_min_ppm: 'number',
   ranker_fatigue_mean_ppm: 'number',
   ranker_fatigue_disagreements: 'number',
+  /**
+   * The request's one Flash pCTR batch (`ad-model/decisions-pctr.ts`), present
+   * whenever the scorer is configured: the model label, the attempt outcome
+   * (`scored`, `control`, `timeout`, `http_error`, `no_candidates`, ...), its
+   * latency, how many ads it asked about out of how many were eligible (the
+   * cut keeps the best 25), and the input budget's token estimate, provider
+   * usage and whether it trimmed context or omitted view history. Id-free.
+   */
+  decisions_pctr_model: 'string',
+  decisions_pctr_outcome: 'string',
+  decisions_pctr_latency_ms: 'number',
+  decisions_pctr_questions: 'number',
+  decisions_pctr_eligible_ads: 'number',
+  decisions_pctr_estimated_input_tokens: 'number',
+  decisions_pctr_input_tokens: 'number',
+  decisions_pctr_context_trimmed: 'boolean',
+  decisions_pctr_history_omitted: 'boolean',
 } as const satisfies AxiomOnlyFieldSchema
 
 /** Settlement telemetry deliberately excludes impression, campaign, and
@@ -930,8 +1008,10 @@ export type AxiomOnlyLogEvent = {
     | typeof CONTEXT_PRUNING_COMPLETED_EVENT
     | typeof STREAM_RECOVERY_EVENT
     | typeof FILE_WRITE_GUARD_EVENT
-    | typeof MODEL_COMPACTION_FALLBACK_EVENT
-    | typeof MODEL_COMPACTION_COMPLETED_EVENT
+    | typeof MECHANICAL_COMPACTION_SKIPPED_EVENT
+    | typeof CONTEXT_COMPACTION_COMPLETED_EVENT
+    | typeof COMPACTION_FOLLOWUP_EVENT
+    | typeof TODO_PROGRESS_REMINDER_EVENT
     | typeof ADS_FETCH_COMPLETED_EVENT
     | typeof ADS_FIRST_PARTY_DECISION_EVENT
     | typeof ADS_FIRST_PARTY_SETTLEMENT_EVENT
@@ -1010,19 +1090,34 @@ export function getAxiomOnlyLogEvent(
       data: sanitizeAllowlistedFields(record, FILE_WRITE_GUARD_FIELDS),
     }
   }
-  if (eventName === MODEL_COMPACTION_FALLBACK_EVENT) {
-    return {
-      event: eventName,
-      data: sanitizeAllowlistedFields(record, MODEL_COMPACTION_FALLBACK_FIELDS),
-    }
-  }
-  if (eventName === MODEL_COMPACTION_COMPLETED_EVENT) {
+  if (eventName === MECHANICAL_COMPACTION_SKIPPED_EVENT) {
     return {
       event: eventName,
       data: sanitizeAllowlistedFields(
         record,
-        MODEL_COMPACTION_COMPLETED_FIELDS,
+        MECHANICAL_COMPACTION_SKIPPED_FIELDS,
       ),
+    }
+  }
+  if (eventName === CONTEXT_COMPACTION_COMPLETED_EVENT) {
+    return {
+      event: eventName,
+      data: sanitizeAllowlistedFields(
+        record,
+        CONTEXT_COMPACTION_COMPLETED_FIELDS,
+      ),
+    }
+  }
+  if (eventName === COMPACTION_FOLLOWUP_EVENT) {
+    return {
+      event: eventName,
+      data: sanitizeAllowlistedFields(record, COMPACTION_FOLLOWUP_FIELDS),
+    }
+  }
+  if (eventName === TODO_PROGRESS_REMINDER_EVENT) {
+    return {
+      event: eventName,
+      data: sanitizeAllowlistedFields(record, TODO_PROGRESS_REMINDER_FIELDS),
     }
   }
   if (eventName === ADS_FETCH_COMPLETED_EVENT) {

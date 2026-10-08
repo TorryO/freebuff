@@ -7,6 +7,7 @@ import {
   withSystemTags,
 } from '@codebuff/agent-runtime/util/messages'
 import { MAX_AGENT_STEPS_DEFAULT } from '@codebuff/common/constants/agents'
+import { BYOK_LOCAL_USER_ID } from '@codebuff/common/constants/byok'
 import { toRepoSnapshot } from '@codebuff/common/util/file'
 import { dropUnansweredToolCalls } from '@codebuff/common/util/messages'
 import {
@@ -298,7 +299,7 @@ export type RunOptions = {
   onUsage?: (usage: AgentUsageData) => void
   /** A model request ended before an exact provider usage receipt arrived. */
   onUsageIncomplete?: () => void
-  /** Successful model-generated compaction, including the exact saved summary. */
+  /** Successful compaction, including the exact saved summary. */
   onCompaction?: (data: ContextCompactionData) => void
   /** A compaction pass began. `onCompactionEnd` always follows, after any `onCompaction`. */
   onCompactionStart?: (data: Pick<ContextCompactionData, 'trigger'>) => void
@@ -659,8 +660,6 @@ async function runOnce({
             ? byokTemplate.compactContext
             : {}),
           maxContextLength: limits.maxContextLength,
-          // The summarizer request is clamped to this cap like any other
-          // BYOK request, so compaction must ask for a summary that fits it.
           maxOutputTokens: limits.maxOutputTokens,
         }
       }
@@ -944,7 +943,7 @@ async function runOnce({
   if (byok) {
     // BYOK is intentionally auth-free: no Codebuff identity, run ledger,
     // token-count, analytics, or helper request is necessary for inference.
-    userId = requestedUserId ?? 'byok-local'
+    userId = requestedUserId ?? BYOK_LOCAL_USER_ID
   } else {
     let userInfo: { id: string } | null
     try {

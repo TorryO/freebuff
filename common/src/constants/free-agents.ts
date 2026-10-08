@@ -201,8 +201,8 @@ export const FREEBUFF_WEB_BASE3_AGENT_ID_BY_MODEL: Record<string, string> = {
   [FREEBUFF_GLM_V53_FLASH_MODEL_ID]: 'base3-free-glm-5-3-flash',
   [FREEBUFF_KIMI_K3_ECO_MODEL_ID]: 'base3-free-kimi-k3-eco',
   [FREEBUFF_GPT_5_6_LUNA_ES_MODEL_ID]: 'base3-free-luna-es',
-  // 1.2 is retired from the picker (2026-09-02) and this entry stays while
-  // its sessions drain; 1.3 is the live row. Both Web/Cloud only.
+  // 1.3 is the live row. 1.2 left every picker on 2026-09-28 and this entry
+  // stays because released CLI and Desktop binaries still send it (paid-only).
   [FREEBUFF_MUSE_SPARK_12_CONTRIBUTOR_MODEL_ID]: 'base3-free-muse-spark',
   [FREEBUFF_MUSE_SPARK_13_CONTRIBUTOR_MODEL_ID]: 'base3-free-muse-spark-1-3',
   [FREEBUFF_OX_ALPHA_MODEL_ID]: 'base3-free-ox-alpha',
@@ -224,9 +224,10 @@ export const FREEBUFF_WEB_BASE3_AGENT_ID_BY_MODEL: Record<string, string> = {
  * for no analysis that `surface` does not already answer.
  *
  * Kept as its own map rather than folded into the Web one because the model
- * sets genuinely differ in both directions: Web offers Kimi K3 Eco and Muse
- * Spark, which no CLI build can select; the CLI offers Claude Fable 5.1 on base2,
- * which Web never surfaces. `freebuff_bundled_agents.test.ts` asserts the Web
+ * sets genuinely differ in both directions: Web offers Kimi K3 Eco and GPT-5.6
+ * Luna-ES, which no CLI build can select; the CLI offers Claude Fable 5.1 on
+ * base2, which Web never surfaces. (Muse Spark was Web-only until 2026-09-04;
+ * both versions are in both maps now.) `freebuff_bundled_agents.test.ts` asserts the Web
  * map covers exactly the Web base2 models, so a CLI-only model added there
  * would fail that parity check for the wrong reason.
  */
@@ -488,11 +489,10 @@ export const FREEBUFF_ROOT_AGENT_IDS = [
   'base2-free-mistral-large',
   'base2-free-codestral-2508',
   'base2-free-llama-4-maverick',
-  // Muse Spark roots, Web/Cloud only. 1.2's root stays while its Web
-  // sessions drain (the model is retired from the picker as of 2026-09-02);
-  // 1.3's is the live one. Listed here like every other root so their
-  // subagents pass the hierarchy gate; the model, not this list, is what keeps
-  // them off the CLI and Desktop.
+  // Muse Spark roots, on every surface. 1.3's is the live one; 1.2's stays
+  // because released CLI and Desktop binaries still send it (the model left
+  // every picker on 2026-09-28 and is paid-only). Listed here like every other
+  // root so their subagents pass the hierarchy gate.
   'base2-free-muse-spark',
   'base2-free-muse-spark-1-3',
   'base2-free-gemini-3-8-flash',
@@ -912,9 +912,10 @@ export const FREE_MODE_AGENT_MODELS: Record<string, Set<string>> = {
   'base2-free-mistral-large': new Set([FREEBUFF_MISTRAL_LARGE_MODEL_ID]),
   'base2-free-codestral-2508': new Set([FREEBUFF_CODESTRAL_2508_MODEL_ID]),
   'base2-free-llama-4-maverick': new Set([FREEBUFF_LLAMA_4_MAVERICK_MODEL_ID]),
-  // The Muse Spark root — on every surface since 2026-09-07, when 1.3 was
-  // withdrawn and 1.2 took its place. Exactly one model, like every other
-  // pinned root:
+  // Muse Spark 1.2's root — on every surface since 2026-09-07, when 1.3 was
+  // withdrawn and 1.2 took its place; out of every picker again since
+  // 2026-09-28, kept for released binaries. Exactly one model, like every
+  // other pinned root:
   // the rate-limit queue accounts by model, so a root that could also run
   // something else would let a turn escape the queue's bookkeeping.
   'base2-free-muse-spark': new Set([

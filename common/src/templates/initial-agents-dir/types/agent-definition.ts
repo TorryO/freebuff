@@ -205,11 +205,10 @@ export interface AgentDefinition {
    */
   suppressCommitAttribution?: boolean
 
-  /** Opt in to model-based context compaction: the same model writes a handoff
-   * through complete_compaction before continuing. Defaults to false.
+  /** Opt in to in-process context compaction. Defaults to false.
    *
    * Compaction reserves input headroom and also runs after an idle gap. It is
-   * an inference request and uses the run's normal billing/provider. Pass
+   * a mechanical rewrite of the history (no model call). Pass
    * `{ cacheExpiryMs }` to tune that idle threshold, or `{ cacheExpiryMs: null }`
    * to compact on the context limit only.
    *
@@ -453,7 +452,6 @@ export type ModelName =
   | 'anthropic/claude-opus-4.5'
   | 'anthropic/claude-haiku-4.5'
   | 'anthropic/claude-sonnet-4.5'
-  | 'anthropic/claude-opus-4.1'
 
   // Gemini
   | 'google/gemini-3.1-pro-preview'
